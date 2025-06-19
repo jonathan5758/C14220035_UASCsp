@@ -1,23 +1,56 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { motion } from 'framer-motion'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { 
+  Package, 
+  DollarSign, 
+  TrendingUp, 
+  Plus, 
+  Edit, 
+  Trash2, 
+  Search,
+  BarChart3,
+  AlertTriangle
+} from 'lucide-react'
 import { supabase, Product } from '@/lib/supabase'
+import { formatCurrency } from '@/lib/utils'
+import { productSchema, type ProductFormData } from '@/lib/validations'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/Card'
+import { Button } from './ui/Button'
+import { Input } from './ui/Input'
+import { Modal } from './ui/Modal'
+import { LoadingSpinner } from './ui/LoadingSpinner'
 import toast from 'react-hot-toast'
 
 export default function AdminDashboard() {
   const [products, setProducts] = useState<Product[]>([])
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
-  const [formData, setFormData] = useState({
-    nama_produk: '',
-    harga_satuan: '',
-    quantity: ''
+  const [searchTerm, setSearchTerm] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+    reset,
+    setValue
+  } = useForm<ProductFormData>({
+    resolver: zodResolver(productSchema)
   })
 
   useEffect(() => {
     fetchProducts()
   }, [])
+
+  useEffect(() => {
+    filterProducts()
+  }, [products, searchTerm])
 
   const fetchProducts = async () => {
     try {
@@ -36,30 +69,38 @@ export default function AdminDashboard() {
     }
   }
 
+  const filterProducts = () => {
+    let filtered = products
+    if (searchTerm) {
+      filtered = filtered.filter(product =>
+        product.nama_produk.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    }
+    setFilteredProducts(filtered)
+  }
+
   const handleCreate = () => {
     setEditingProduct(null)
-    setFormData({ nama_produk: '', harga_satuan: '', quantity: '' })
+    reset()
     setShowModal(true)
   }
 
   const handleEdit = (product: Product) => {
     setEditingProduct(product)
-    setFormData({
-      nama_produk: product.nama_produk,
-      harga_satuan: product.harga_satuan.toString(),
-      quantity: product.quantity.toString()
-    })
+    setValue('nama_produk', product.nama_produk)
+    setValue('harga_satuan', product.harga_satuan)
+    setValue('quantity', product.quantity)
     setShowModal(true)
   }
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this product?')) return
+  const handleDelete = async (product: Product) => {
+    if (!confirm(`Are you sure you want to delete "${product.nama_produk}"?`)) return
 
     try {
       const { error } = await supabase
         .from('products')
         .delete()
-        .eq('id', id)
+        .eq('id', product.id)
 
       if (error) throw error
       
@@ -71,25 +112,14 @@ export default function AdminDashboard() {
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const onSubmit = async (data: ProductFormData) => {
+    setIsSubmitting(true)
     
-    if (!formData.nama_produk.trim() || !formData.harga_satuan || !formData.quantity) {
-      toast.error('Please fill in all fields')
-      return
-    }
-
-    const productData = {
-      nama_produk: formData.nama_produk.trim(),
-      harga_satuan: parseInt(formData.harga_satuan),
-      quantity: parseInt(formData.quantity)
-    }
-
     try {
       if (editingProduct) {
         const { error } = await supabase
           .from('products')
-          .update(productData)
+          .update(data)
           .eq('id', editingProduct.id)
 
         if (error) throw error
@@ -97,178 +127,325 @@ export default function AdminDashboard() {
       } else {
         const { error } = await supabase
           .from('products')
-          .insert([productData])
+          .insert([data])
 
         if (error) throw error
         toast.success('Product created successfully')
       }
 
       setShowModal(false)
+      reset()
       fetchProducts()
     } catch (error) {
       toast.error(editingProduct ? 'Failed to update product' : 'Failed to create product')
       console.error('Error:', error)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR'
-    }).format(amount)
-  }
+  const totalProducts = products.length
+  const inStockProducts = products.filter(p => p.quantity > 0).length
+  const outOfStockProducts = products.filter(p => p.quantity === 0).length
+  const totalValue = products.reduce((sum, p) => sum + (p.harga_satuan * p.quantity), 0)
 
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <LoadingSpinner size="lg" text="Loading dashboard..." />
       </div>
     )
   }
 
   return (
-    <div className="bg-white shadow rounded-lg">
-      <div className="px-4 py-5 sm:p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg leading-6 font-medium text-gray-900">
-            Product Management
-          </h3>
-          <button
-            onClick={handleCreate}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
-          >
-            Add Product
-          </button>
-        </div>
-        
-        <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 md:rounded-lg">
-          <table className="min-w-full divide-y divide-gray-300">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Product Name
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Unit Price
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Quantity
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {products.map((product) => (
-                <tr key={product.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {product.nama_produk}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {formatCurrency(product.harga_satuan)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {product.quantity}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button
-                      onClick={() => handleEdit(product)}
-                      className="text-blue-600 hover:text-blue-900 transition-colors"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(product.id)}
-                      className="text-red-600 hover:text-red-900 transition-colors"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+    <div className="space-y-6">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <Card className="card-hover">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Products</CardTitle>
+              <Package className="h-4 w-4 text-blue-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{totalProducts}</div>
+              <p className="text-xs text-gray-500">Products in catalog</p>
+            </CardContent>
+          </Card>
+        </motion.div>
 
-        {products.length === 0 && (
-          <div className="text-center py-8">
-            <p className="text-gray-500">No products available</p>
-          </div>
-        )}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <Card className="card-hover">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">In Stock</CardTitle>
+              <TrendingUp className="h-4 w-4 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{inStockProducts}</div>
+              <p className="text-xs text-gray-500">Available products</p>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+        >
+          <Card className="card-hover">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Out of Stock</CardTitle>
+              <AlertTriangle className="h-4 w-4 text-red-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{outOfStockProducts}</div>
+              <p className="text-xs text-gray-500">Need restocking</p>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+        >
+          <Card className="card-hover">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Value</CardTitle>
+              <DollarSign className="h-4 w-4 text-purple-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{formatCurrency(totalValue)}</div>
+              <p className="text-xs text-gray-500">Inventory value</p>
+            </CardContent>
+          </Card>
+        </motion.div>
       </div>
 
-      {/* Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div className="mt-3">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">
-                {editingProduct ? 'Edit Product' : 'Add New Product'}
-              </h3>
+      {/* Product Management */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.5 }}
+      >
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-4 sm:space-y-0">
+              <div>
+                <CardTitle className="text-xl flex items-center">
+                  <BarChart3 className="mr-2 h-5 w-5" />
+                  Product Management
+                </CardTitle>
+                <CardDescription>Manage your product inventory</CardDescription>
+              </div>
               
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Product Name
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.nama_produk}
-                    onChange={(e) => setFormData({ ...formData, nama_produk: e.target.value })}
-                    className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    required
+              <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    placeholder="Search products..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10 w-full sm:w-64"
                   />
                 </div>
                 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Unit Price (IDR)
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.harga_satuan}
-                    onChange={(e) => setFormData({ ...formData, harga_satuan: e.target.value })}
-                    className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    required
-                    min="0"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Quantity
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.quantity}
-                    onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                    className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    required
-                    min="0"
-                  />
-                </div>
-                
-                <div className="flex justify-end space-x-3 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => setShowModal(false)}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-md transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
-                  >
-                    {editingProduct ? 'Update' : 'Create'}
-                  </button>
-                </div>
-              </form>
+                <Button onClick={handleCreate} className="btn-hover">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Product
+                </Button>
+              </div>
             </div>
+          </CardHeader>
+          
+          <CardContent>
+            <div className="overflow-hidden rounded-lg border border-gray-200">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Product
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Price
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Quantity
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Total Value
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filteredProducts.map((product, index) => (
+                      <motion.tr
+                        key={product.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                        className="table-row-hover"
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <div className="h-10 w-10 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg flex items-center justify-center mr-3">
+                              <Package className="h-5 w-5 text-white" />
+                            </div>
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">
+                                {product.nama_produk}
+                              </div>
+                              <div className="text-sm text-gray-500">
+                                ID: {product.id}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">
+                          {formatCurrency(product.harga_satuan)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {product.quantity.toLocaleString()}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`status-badge ${
+                            product.quantity > 0 ? 'status-success' : 'status-error'
+                          }`}>
+                            {product.quantity > 0 ? 'In Stock' : 'Out of Stock'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">
+                          {formatCurrency(product.harga_satuan * product.quantity)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <div className="flex space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEdit(product)}
+                              className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDelete(product)}
+                              className="text-red-600 border-red-200 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {filteredProducts.length === 0 && (
+              <div className="text-center py-12">
+                <Package className="mx-auto h-12 w-12 text-gray-400" />
+                <h3 className="mt-2 text-sm font-medium text-gray-900">No products found</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  {searchTerm 
+                    ? 'Try adjusting your search criteria.' 
+                    : 'Get started by creating your first product.'
+                  }
+                </p>
+                {!searchTerm && (
+                  <div className="mt-6">
+                    <Button onClick={handleCreate}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Product
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Product Modal */}
+      <Modal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        title={editingProduct ? 'Edit Product' : 'Add New Product'}
+        description={editingProduct ? 'Update product information' : 'Create a new product in your inventory'}
+      >
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Product Name
+            </label>
+            <Input
+              {...register('nama_produk')}
+              placeholder="Enter product name"
+              error={errors.nama_produk?.message}
+            />
           </div>
-        </div>
-      )}
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Unit Price (IDR)
+            </label>
+            <Input
+              {...register('harga_satuan', { valueAsNumber: true })}
+              type="number"
+              placeholder="Enter unit price"
+              min="0"
+              step="1000"
+              error={errors.harga_satuan?.message}
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Quantity
+            </label>
+            <Input
+              {...register('quantity', { valueAsNumber: true })}
+              type="number"
+              placeholder="Enter quantity"
+              min="0"
+              error={errors.quantity?.message}
+            />
+          </div>
+          
+          <div className="flex justify-end space-x-3 pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowModal(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              loading={isSubmitting}
+            >
+              {editingProduct ? 'Update Product' : 'Create Product'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }
